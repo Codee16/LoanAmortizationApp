@@ -5,25 +5,43 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
+# ------------------ PAGE CONFIG ------------------ #
 st.set_page_config(page_title="Mortgage Calculator", layout="wide")
 st.title("🏡 Mortgage & Financial Analytics")
 
-tab1, tab2 = st.tabs(["📊 Mortgage Calculator", "📈 User Financial Analytics"])
+# ------------------ DISCLAIMER ------------------ #
+with st.expander("⚠️ Disclaimer"):
+    st.write("""
+    This app is for **educational purposes only** and should not be considered financial advice.  
+    Calculations are based on user inputs and assumptions.  
+    Please consult with a qualified financial advisor before making decisions.
+    """)
 
-# ------------------ TAB 1 ------------------ #
+# ------------------ TABS ------------------ #
+tab1, tab2, tab3 = st.tabs([
+    "🏠 Mortgage Calculator", 
+    "📈 Property Value & Net Proceeds", 
+    "💰 Rent vs Buy Analytics"
+])
+
+# ------------------ TAB 1: Mortgage Calculator ------------------ #
 with tab1:
     st.header("Mortgage Calculator")
 
     with st.form("mortgage_form"):
         col1, col2 = st.columns(2)
+
         with col1:
             property_value = st.number_input("Property Value ($)", value=575000, step=1000)
             downpayment_pct = st.number_input("Down Payment (%)", value=20.0, step=1.0)
             loan_start_date = st.date_input("Loan Start Date", value=datetime.today())
             tenure_years = st.number_input("Loan Tenure (Years)", min_value=1, value=30, step=1)
             payments_per_year = st.number_input("Payments per Year", min_value=1, value=12, step=1)
+            one_time_payment = st.number_input("One-time Lump Sum Payment ($)", min_value=0.0, value=0.0, step=1000.0)
+            one_time_payment_date = st.date_input("One-time Payment Date", value=datetime.today())
+            tax_rebate = st.number_input("Lump Sum Tax Rebate ($)", min_value=0.0, value=0.0, step=1000.0)
+
         with col2:
-            state_subsidy = st.number_input("State Lump Sum Subsidy ($)", value=0, step=1000)
             true_rate = st.number_input("True Loan Rate (%)", min_value=0.1, value=4.99, step=0.01)
             interest_rate_1 = st.number_input("Customer Rate Year 1 (%)", min_value=0.1, value=2.99, step=0.01)
             interest_rate_2 = st.number_input("Customer Rate Year 2 (%)", min_value=0.1, value=3.99, step=0.01)
@@ -31,20 +49,11 @@ with tab1:
             hoa_fee = st.number_input("Monthly HOA Fee ($)", min_value=0.0, value=66.0, step=10.0)
             insurance = st.number_input("Monthly Property Insurance ($)", min_value=0.0, value=150.0, step=10.0)
             addl_regular_payment = st.number_input("Additional Regular Payment ($)", min_value=0.0, value=0.0, step=100.0)
-            addl_one_time_payment = st.number_input("One-Time Extra Payment ($)", min_value=0.0, value=0.0, step=500.0)
-            addl_one_time_date = st.date_input("One-Time Payment Date", value=loan_start_date + timedelta(days=365))
-            property_growth = st.number_input("Base Annual Property Value Increase (%)", value=2.5, step=0.1)
-            age_threshold = st.number_input("Property Age Before Growth Slows (Years)", value=10, step=1)
-            depreciation_factor = st.number_input("Annual Growth Reduction After Threshold (%)", value=0.2, step=0.1)
-            selling_cost_pct = st.number_input("Selling Cost (%)", min_value=0.0, value=8.0, step=0.1)
 
-        submitted = st.form_submit_button("Submit")
+        submitted = st.form_submit_button("Calculate Schedule")
 
     if submitted:
-        # Derived Loan Amount
         loan_amount = property_value * (1 - downpayment_pct / 100)
-
-        my_bar = st.progress(0, text="Generating amortization schedule...")
         num_payments = tenure_years * payments_per_year
         rate_per_period_true = (true_rate / 100) / payments_per_year
         base_payment = npf.pmt(rate_per_period_true, num_payments, -loan_amount)
@@ -53,43 +62,40 @@ with tab1:
         schedule = []
         current_date = loan_start_date
 
-        taxable_value = property_value - state_subsidy  # for property tax
+        # Effective property value for tax calculation (rebate applied)
+        effective_property_value = property_value - tax_rebate
 
         for n in range(1, num_payments + 1):
             current_year = (n - 1) // payments_per_year + 1
 
-            # True interest accrual
+            # Interest and principal split
             true_interest = balance * rate_per_period_true
             principal_payment = base_payment - true_interest + addl_regular_payment
 
-            # Customer pays reduced interest (subsidy in year 1 & 2)
+            # Subsidized customer interest
             if current_year == 1:
                 customer_rate = (interest_rate_1 / 100) / payments_per_year
             elif current_year == 2:
                 customer_rate = (interest_rate_2 / 100) / payments_per_year
             else:
                 customer_rate = rate_per_period_true
-
             customer_interest = balance * customer_rate
-            builder_subsidy = true_interest - customer_interest
 
-            # One-time extra payment
-            if addl_one_time_payment > 0 and current_date >= addl_one_time_date:
-                principal_payment += addl_one_time_payment
-                addl_one_time_payment = 0
+            # One-time lump sum
+            if one_time_payment > 0 and current_date == one_time_payment_date:
+                principal_payment += one_time_payment
 
             if principal_payment > balance:
                 principal_payment = balance
             balance -= principal_payment
 
-            # Property tax on value after state subsidy
-            property_tax = (property_tax_rate / 100) * taxable_value / payments_per_year
+            # Property tax based on effective property value
+            property_tax = (property_tax_rate / 100) * effective_property_value / payments_per_year
             total_payment = customer_interest + principal_payment + hoa_fee + insurance + property_tax
 
             schedule.append([
                 current_date, balance, principal_payment, customer_interest,
-                true_interest, builder_subsidy, total_payment,
-                hoa_fee, property_tax, insurance
+                true_interest, total_payment, hoa_fee, property_tax, insurance
             ])
 
             if balance <= 0:
@@ -97,36 +103,42 @@ with tab1:
 
             current_date += timedelta(days=365 // payments_per_year)
 
-            # Progress bar
-            if n % (num_payments // 10 or 1) == 0:
-                pct = min(100, int((n / num_payments) * 100))
-                msg = "🤔 Crunching numbers..." if pct < 50 else "📈 Processing payments..." if pct < 90 else "✅ Almost done..."
-                my_bar.progress(pct, text=f"{msg} ({pct}%)")
-
-        my_bar.progress(100, text="🎉 Completed amortization schedule!")
-
         df = pd.DataFrame(schedule, columns=[
             "Date", "Balance", "Principal", "CustomerInterest",
-            "TrueInterest", "BuilderSubsidy", "TotalPayment",
-            "HOA", "PropertyTax", "Insurance"
+            "TrueInterest", "TotalPayment", "HOA", "PropertyTax", "Insurance"
         ])
-
+        df["Year"] = pd.to_datetime(df["Date"]).dt.year
         df["Principal+Interest"] = df["Principal"] + df["CustomerInterest"]
-        df["CumulativePrincipal"] = df["Principal"].cumsum()
 
-        st.success("Amortization schedule generated ✅")
-        st.subheader("Amortization Schedule")
+        st.success("✅ Amortization schedule generated")
         st.dataframe(df.head(24))
 
-        # Charts
-        fig = px.area(df, x="Date", y=["Principal", "CustomerInterest"], title="Principal vs Customer Interest Over Time")
-        st.plotly_chart(fig, use_container_width=True)
+        # Visualization
+        st.plotly_chart(
+            px.area(df, x="Date", y=["Principal", "CustomerInterest"], 
+                    title="Principal vs Interest Over Time"), 
+            use_container_width=True
+        )
+        st.session_state["df"] = df
+        st.session_state["loan_params"] = {
+            "property_value": property_value,
+            "tenure_years": tenure_years,
+            "selling_cost_pct": 8.0
+        }
 
-        fig2 = px.bar(df, x="Date", y="BuilderSubsidy", title="Builder Subsidy Over Time")
-        st.plotly_chart(fig2, use_container_width=True)
+# ------------------ TAB 2: Property Value & Net Proceeds ------------------ #
+with tab2:
+    st.header("Property Value & Net Proceeds Analysis")
 
-        fig3 = px.line(df, x="Date", y="CumulativePrincipal", title="Cumulative Equity (Principal Paid Over Time)")
-        st.plotly_chart(fig3, use_container_width=True)
+    if "df" in st.session_state:
+        df = st.session_state["df"]
+        property_value = st.session_state["loan_params"]["property_value"]
+        tenure_years = st.session_state["loan_params"]["tenure_years"]
+
+        property_growth = st.number_input("Annual Property Growth (%)", value=2.5, step=0.1)
+        age_threshold = st.number_input("Growth Slows After (Years)", value=10, step=1)
+        depreciation_factor = st.number_input("Annual Growth Reduction After Threshold (%)", value=0.2, step=0.1)
+        selling_cost_pct = st.number_input("Selling Cost (%)", min_value=0.0, value=8.0, step=0.1)
 
         # ---------------- Property Value Growth vs Selling Cost (with age impact) ---------------- #
         prop_values = [property_value]
@@ -139,7 +151,7 @@ with tab1:
             prop_values.append(prop_values[-1] * (1 + effective_growth / 100))
 
         selling_cost_rate = selling_cost_pct / 100
-        net_proceeds = [v - v*selling_cost_rate for v in prop_values]
+        net_proceeds = [v - v * selling_cost_rate for v in prop_values]
 
         # Bubble size scaled
         bubble_sizes = [max(10, min(50, (v - min(net_proceeds)) / (max(net_proceeds) - min(net_proceeds) + 1e-5) * 40 + 10)) for v in net_proceeds]
@@ -148,14 +160,14 @@ with tab1:
 
         fig4 = go.Figure()
         fig4.add_trace(go.Scatter(
-            x=list(range(0, years+1)),
+            x=list(range(0, years + 1)),
             y=prop_values,
             mode='lines+markers',
             name="Property Value",
             line=dict(color="blue")
         ))
         fig4.add_trace(go.Scatter(
-            x=list(range(0, years+1)),
+            x=list(range(0, years + 1)),
             y=net_proceeds,
             mode='markers',
             name=f"Net Proceeds (after {selling_cost_pct}% selling cost)",
@@ -178,25 +190,44 @@ with tab1:
         })
         net_proceed_table = net_proceed_table.merge(yearly_balance, how="left", left_on="Year", right_on="Year")
         net_proceed_table["ActualNetProceed"] = net_proceed_table["NetProceedsAfterSellingCost"] - net_proceed_table["Balance"].fillna(0)
+
+        # ✅ Add Net Gain/Loss column (vs Original Purchase Price)
+        original_property_value = st.session_state["loan_params"]["property_value"]
+        net_proceed_table["NetGainOrLoss"] = net_proceed_table["NetProceedsAfterSellingCost"] - original_property_value
+
         st.subheader("Net Proceed Table (Net Proceeds - Remaining Loan Balance)")
-        st.dataframe(net_proceed_table)
+        def highlight_gain_loss(val):
+            color = 'green' if val >= 0 else 'red'
+            return f'color: {color}; font-weight: bold;'
 
-# ------------------ TAB 2 ------------------ #
-with tab2:
-    st.header("User Financial Analytics")
-    col1, col2 = st.columns(2)
-    with col1:
-        rent = st.number_input("Monthly Rent ($)", min_value=0, value=1500, step=100)
-    with col2:
-        rent_increase = st.number_input("Annual Rent Increase (%)", min_value=0.0, value=3.0, step=0.5)
+        st.dataframe(
+            net_proceed_table.style.applymap(highlight_gain_loss, subset=["NetGainOrLoss"]).format({
+                "PropertyValue": "${:,.0f}",
+                "NetProceedsAfterSellingCost": "${:,.0f}",
+                "Balance": "${:,.0f}",
+                "ActualNetProceed": "${:,.0f}",
+                "NetGainOrLoss": "${:,.0f}"
+            })
+        )
 
-    if submitted:
+# ------------------ TAB 3: Rent vs Buy ------------------ #
+with tab3:
+    st.header("Rent vs Buy Analytics")
+
+    if "df" in st.session_state:
+        df = st.session_state["df"]
+
+        col1, col2 = st.columns(2)
+        with col1:
+            rent = st.number_input("Monthly Rent ($)", min_value=0, value=1500, step=100)
+        with col2:
+            rent_increase = st.number_input("Annual Rent Increase (%)", min_value=0.0, value=3.0, step=0.5)
+
         df_yearly = df.groupby("Year").agg({
             "CustomerInterest": "sum",
             "HOA": "sum",
             "PropertyTax": "sum",
             "Insurance": "sum",
-            "BuilderSubsidy": "sum",
             "Principal": "sum"
         }).reset_index()
 
@@ -206,13 +237,15 @@ with tab2:
         df_yearly["TotalNonEquityCost"] = df_yearly["CustomerInterest"] + df_yearly["HOA"] + df_yearly["PropertyTax"] + df_yearly["Insurance"]
         df_yearly["EquityBuilt"] = df_yearly["Principal"].cumsum()
 
-        st.subheader("Yearly Cost Comparison (Rent vs Mortgage Non-Equity Costs)")
+        st.subheader("📉 Yearly Rent vs Mortgage Costs")
         st.dataframe(df_yearly)
-        fig_rent = px.bar(df_yearly, x="Year", y=["TotalNonEquityCost", "AnnualRent"], barmode="group",
-                          title="Rent vs Mortgage Non-Equity Payments")
-        st.plotly_chart(fig_rent, use_container_width=True)
 
-        fig_equity = px.line(df_yearly, x="Year", y="EquityBuilt", title="Net Equity Built Over Time")
-        st.plotly_chart(fig_equity, use_container_width=True)
-
-        st.info("👉 Equity builds as cumulative principal grows. Builder subsidy reduces your out-of-pocket interest in years 1 & 2.")
+        st.plotly_chart(
+            px.bar(df_yearly, x="Year", y=["TotalNonEquityCost", "AnnualRent"], 
+                   barmode="group", title="Rent vs Mortgage Non-Equity Payments"),
+            use_container_width=True
+        )
+        st.plotly_chart(
+            px.line(df_yearly, x="Year", y="EquityBuilt", title="Equity Built Over Time"),
+            use_container_width=True
+        )
