@@ -249,3 +249,9 @@ with tab3:
             px.line(df_yearly, x="Year", y="EquityBuilt", title="Equity Built Over Time"),
             use_container_width=True
         )
+# ------------------ Footer / Developer Info ------------------ #
+st.markdown("---")
+st.markdown(
+    "<p style='text-align: center; font-size:14px;'>Developed by <b>Alok Kumar Mishra</b></p>",
+    unsafe_allow_html=True
+)
